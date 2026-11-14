@@ -50,8 +50,11 @@ def reproject_exposure(exp: Exposure, wcs: WCS, shape):
     bad = exp.bad_mask()
     img = np.where(bad, np.nan, exp.background_subtracted()).astype(np.float64)
     var = np.where(bad, np.nan, exp.variance).astype(np.float64)
-    contam = exp.flag_mask(("CROSSTALK", "GHOST", "GHOST_FPA", "GHOST_EXT", "STREAK",
-                            "BLOOM", "SNOWBALL", "HALO", "OVERFLOW", "NONLINEAR"))
+    # Слой FLAGS должен показывать и загрязнения, и пиксели, исключённые из науки
+    # (например OVERFLOW / HOT / OUTLIER). SOURCE намеренно НЕ включён:
+    # это информационный бит о наличии источника, а не плохой пиксель.
+    from Exposure import CONTAMINATION_FLAGS, HARD_BAD_FLAGS
+    contam = exp.flag_mask(CONTAMINATION_FLAGS + HARD_BAD_FLAGS)
 
     r_img, foot = reproject_interp((img, exp.wcs), wcs, shape_out=shape, order="bilinear")
     r_var, _ = reproject_interp((var, exp.wcs), wcs, shape_out=shape, order="bilinear")
@@ -134,27 +137,22 @@ def difference(frames: list[Frame]) -> tuple[list[np.ndarray], np.ndarray]:
     return out, template
 
 
-TRAIL_OLD = (0.25, 0.55, 1.0)   # синий — самая ранняя эпоха
-TRAIL_NEW = (1.0, 0.85, 0.15)   # жёлтый — самая поздняя
-
-
-def trail(diff_sigma: list[np.ndarray], clip: float = 8.0, floor: float = 2.0) -> np.ndarray:
+def trail(diff_sigma: list[np.ndarray], clip: float = 8.0) -> np.ndarray:
     """«След» движения на одной картинке (RGB 0..1).
 
-    Положительные остатки каждой эпохи окрашиваются цветом по времени (старые — синие,
-    средние — зелёные, новые — жёлтые) с прозрачностью α от 0.55 до 1.0 и СКЛАДЫВАЮТСЯ.
+    Положительные остатки каждой эпохи окрашиваются цветом по времени (viridis: старые —
+    фиолетовые, новые — жёлтые) с прозрачностью α от 0.35 до 1.0 и СКЛАДЫВАЮТСЯ.
     Обычное наложение слоёв не годится: слой с α=1 полностью закрыл бы все предыдущие.
-    Все цвета палитры яркие: у viridis начало почти чёрное, и старая эпоха терялась на тёмном фоне.
     """
-    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib import colormaps
 
-    cmap = LinearSegmentedColormap.from_list("time", [TRAIL_OLD, (0.2, 0.9, 0.55), TRAIL_NEW])
+    cmap = colormaps["viridis"]
     n = len(diff_sigma)
     rgb = np.zeros((*diff_sigma[0].shape, 3))
     for i, d in enumerate(diff_sigma):
         t = i / max(n - 1, 1)
-        alpha = 0.55 + 0.45 * t
-        # остатки ниже floor σ — шум: без порога каждая эпоха даёт цветную «рябь» по всему кадру
-        pos = np.clip(np.nan_to_num(d) - floor, 0, clip - floor) / (clip - floor)
+        alpha = 0.35 + 0.65 * t
+        pos = np.clip(np.nan_to_num(d), 0, clip) / clip
         rgb += alpha * pos[..., None] * np.array(cmap(t)[:3])
     return np.clip(rgb, 0, 1)
+  
