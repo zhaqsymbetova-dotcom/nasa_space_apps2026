@@ -151,8 +151,15 @@ class Exposure:
     def background_subtracted(self) -> np.ndarray:
         """Снимок минус модель зодиакального света (если её нет — минус медиана)."""
         if self.zodi is not None:
+            # Модель ZODI задаёт фон для каждого пикселя; не заменяем её медианой.
             return self.image - self.zodi
-        return self.image - np.nanmedian(self.image[~self.bad_mask()])
+        # Если ZODI отсутствует, оцениваем фон по конечным пикселям,
+        # исключая hard-bad флаги. Не вызываем bad_mask(): VARIANCE может
+        # отсутствовать в допустимом cutout и тогда вся маска стала бы True.
+        usable = np.isfinite(self.image) & ~self.flag_mask(HARD_BAD_FLAGS)
+        if not np.any(usable):
+            return np.full(self.shape, np.nan, dtype=np.float32)
+        return self.image - np.nanmedian(self.image[usable])
 
     @staticmethod
     def mjysr_to_ujy_per_pixel() -> float:
