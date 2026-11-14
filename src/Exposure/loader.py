@@ -93,7 +93,9 @@ def exposure_from_hdul(hdul: fits.HDUList, source: str = "", *,
         detector=_read_detector(headers, source),
         mjd=_read_mjd(headers, mjd_hint),
         obs_id=str(hdr.get("OBSID", hdul[0].header.get("OBSID", obs_id_hint))),
-        flag_bits=parse_flag_bits(flags_hdu.header) if flags_hdu is not None else {},
+        # Даже если FLAGS отсутствует, Exposure должен иметь таблицу известных битов.
+        # Иначе flag_mask() молча перестанет распознавать плохие пиксели.
+        flag_bits=parse_flag_bits(flags_hdu.header) if flags_hdu is not None else parse_flag_bits(fits.Header()),
         source=source, header=hdr,
     )
 
@@ -133,3 +135,4 @@ def load_exposure(path_or_url: str, *, mjd_hint: float | None = None,
     with fits.open(src, memmap=False) as hdul:
         return exposure_from_hdul(hdul, source=path_or_url,
                                   mjd_hint=mjd_hint, obs_id_hint=obs_id_hint)
+        
